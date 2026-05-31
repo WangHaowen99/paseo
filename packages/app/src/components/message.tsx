@@ -110,6 +110,7 @@ import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mut
 export type { InlinePathTarget } from "@/assistant-file-links";
 
 type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
+type ToolCallStatus = "executing" | "running" | "completed" | "failed" | "canceled";
 
 interface UserMessageProps {
   serverId?: string;
@@ -1224,6 +1225,9 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
   },
+  terminalHeaderRow: {
+    alignItems: "flex-start",
+  },
   labelRow: {
     flex: 1,
     flexDirection: "row",
@@ -1238,6 +1242,30 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
     justifyContent: "center",
     marginRight: theme.spacing[1],
     backgroundColor: "transparent",
+  },
+  terminalIconBadge: {
+    width: 12,
+    height: 22,
+    borderRadius: 0,
+    marginRight: theme.spacing[1],
+  },
+  terminalStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  terminalStatusDotRunning: {
+    backgroundColor: theme.colors.terminal.yellow,
+  },
+  terminalStatusDotCompleted: {
+    backgroundColor: theme.colors.terminal.green,
+  },
+  terminalStatusDotFailed: {
+    backgroundColor: theme.colors.terminal.red,
+  },
+  terminalStatusDotCanceled: {
+    backgroundColor: theme.colors.terminal.brightBlack,
   },
   label: {
     color: theme.colors.foregroundMuted,
@@ -1262,6 +1290,46 @@ const expandableBadgeStylesheet = StyleSheet.create((theme) => ({
   },
   secondaryLabelActive: {
     color: theme.colors.foreground,
+  },
+  terminalLabelRow: {
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  terminalSummaryText: {
+    color: theme.colors.terminal.foreground,
+    fontWeight: theme.fontWeight.normal,
+  },
+  terminalMainLine: {
+    color: theme.colors.terminal.foreground,
+    fontFamily: Fonts.mono,
+    fontSize: theme.fontSize.base,
+    lineHeight: 22,
+    fontWeight: theme.fontWeight.normal,
+  },
+  terminalAction: {
+    color: theme.colors.terminal.foreground,
+    fontWeight: theme.fontWeight.medium,
+  },
+  terminalLabel: {
+    color: theme.colors.terminal.brightBlue,
+    fontWeight: theme.fontWeight.medium,
+  },
+  terminalSummary: {
+    color: theme.colors.terminal.foreground,
+    fontWeight: theme.fontWeight.normal,
+  },
+  terminalOutputLine: {
+    color: theme.colors.terminal.brightBlack,
+    fontFamily: Fonts.mono,
+    fontSize: theme.fontSize.base,
+    lineHeight: 21,
+    marginLeft: 2,
+  },
+  terminalOpenFileButton: {
+    position: "absolute",
+    top: 0,
+    right: 0,
   },
   shimmerText: {
     color: "transparent",
@@ -1538,7 +1606,7 @@ interface MarkdownTerminalTextProps {
 }
 
 const TERMINAL_TOKEN_PATTERN =
-  /(`[^`\n]+`|(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|~[\\/])?(?:[\w.-]+[\\/])+[\w.@-]+(?::\d+)?|[\w.-]+\.(?:[A-Za-z0-9]{1,8})(?::\d+)?|\b(?:passed|pass|success|succeeded|completed|complete|done|ok)\b|\b(?:warning|warn|deprecated)\b|\b(?:failed|fail|error|exception|invalid|timeout|bad gateway)\b|\b(?:match|where|select|update|insert|delete|create|drop|return|from|into|with|using)\b|\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+\b|\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b\d+(?:\.\d+)?(?:ms|s|m|h|%|MB|GB|KB)?\b)/gi;
+  /(`[^`\n]+`|https?:\/\/[^\s)]+|[A-Za-z]:[\\/][^\s)]+|(?:\.{1,2}|~)[\\/][^\s)]+|(?:[\w.@-]+[\\/])+[\w.@-]+\.[A-Za-z0-9]{1,8}(?::\d+)?|[\w.-]+\.(?:[A-Za-z0-9]{1,8})(?::\d+)?|--?[A-Za-z][\w-]*(?:=[^\s]+)?|\b(?:git|gh|npm|npx|pnpm|yarn|node|python|python3|pip|uv|cargo|go|rustc|tsc|rg|grep|find|ls|dir|cd|cat|type|curl|ssh|docker|kubectl|powershell|pwsh|Get-ChildItem|Select-Object|Where-Object|Set-Location|Remove-Item|Copy-Item|Move-Item|New-Item)\b|\b(?:passed|pass|success|succeeded|completed|complete|done|ok)\b|\b(?:warning|warn|deprecated)\b|\b(?:failed|fail|error|exception|invalid|timeout|bad gateway)\b|\b(?:match|where|select|update|insert|delete|create|drop|return|from|into|with|using)\b|\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+\b|\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b\d+(?:\.\d+)?(?:ms|s|m|h|%|MB|GB|KB)?\b|\|)/gi;
 
 function MarkdownTerminalText({
   inheritedStyles,
@@ -1575,6 +1643,13 @@ function MarkdownTerminalText({
 interface TerminalTextSegment {
   text: string;
   style?: TextStyle;
+}
+
+interface TerminalTextLineProps {
+  content: string;
+  styles: MarkdownStyles;
+  baseStyle: StyleProp<TextStyle>;
+  numberOfLines?: number;
 }
 
 function splitTerminalTextSegments(text: string, styles: MarkdownStyles): TerminalTextSegment[] {
@@ -1617,6 +1692,19 @@ function getTerminalTokenStyle(value: string, styles: MarkdownStyles): TextStyle
   if (/^(failed|fail|error|exception|invalid|timeout|bad gateway)$/i.test(value)) {
     return styles.terminalError;
   }
+  if (/^\|$/.test(value)) {
+    return styles.terminalPunctuation;
+  }
+  if (/^--?[A-Za-z]/.test(value)) {
+    return styles.terminalOption;
+  }
+  if (
+    /^(git|gh|npm|npx|pnpm|yarn|node|python|python3|pip|uv|cargo|go|rustc|tsc|rg|grep|find|ls|dir|cd|cat|type|curl|ssh|docker|kubectl|powershell|pwsh|Get-ChildItem|Select-Object|Where-Object|Set-Location|Remove-Item|Copy-Item|Move-Item|New-Item)$/i.test(
+      value,
+    )
+  ) {
+    return styles.terminalCommand;
+  }
   if (
     /^(match|where|select|update|insert|delete|create|drop|return|from|into|with|using)$/i.test(
       value,
@@ -1634,6 +1722,27 @@ function getTerminalTokenStyle(value: string, styles: MarkdownStyles): TextStyle
     return styles.terminalIdentifier;
   }
   return undefined;
+}
+
+function TerminalTextLine({ content, styles, baseStyle, numberOfLines }: TerminalTextLineProps) {
+  const segments = useMemo(() => splitTerminalTextSegments(content, styles), [content, styles]);
+  return (
+    <Text style={baseStyle} numberOfLines={numberOfLines}>
+      {segments.map((segment, index) => (
+        <Text key={`${index}:${segment.text.slice(0, 12)}`} style={segment.style}>
+          {segment.text}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
+function renderTerminalTextSpans(content: string, styles: MarkdownStyles): ReactNode[] {
+  return splitTerminalTextSegments(content, styles).map((segment, index) => (
+    <Text key={`${index}:${segment.text.slice(0, 12)}`} style={segment.style}>
+      {segment.text}
+    </Text>
+  ));
 }
 
 interface MarkdownListItemContentProps {
@@ -2378,6 +2487,9 @@ interface ExpandableBadgeProps {
   isLastInSequence?: boolean;
   disableOuterSpacing?: boolean;
   testID?: string;
+  terminalMode?: boolean;
+  terminalStatus?: ToolCallStatus;
+  terminalOutputPreview?: string;
 }
 
 interface ExpandableBadgeSecondaryLabelProps {
@@ -2552,6 +2664,117 @@ function ExpandableBadgeLabelRow({
       ) : null}
     </View>
   );
+}
+
+interface TerminalExpandableBadgeLabelRowProps {
+  label: string;
+  secondaryLabel?: string;
+  outputPreview?: string;
+  status: ToolCallStatus;
+  showOpenFileButton: boolean;
+  isOpenFileHovered: boolean;
+  onOpenFilePress: (event: GestureResponderEvent) => void;
+  onOpenFileHoverIn: () => void;
+  onOpenFileHoverOut: () => void;
+}
+
+function terminalActionForStatus(status: ToolCallStatus): string {
+  switch (status) {
+    case "running":
+    case "executing":
+      return "Running";
+    case "failed":
+      return "Failed";
+    case "canceled":
+      return "Canceled";
+    case "completed":
+    default:
+      return "Ran";
+  }
+}
+
+const terminalMarkdownStyleMapping = (
+  theme: Theme,
+): { styles: ReturnType<typeof createMarkdownStyles> } => ({
+  styles: createMarkdownStyles(theme),
+});
+
+const ThemedTerminalExpandableBadgeLabelRow = withUnistyles(
+  memo(function TerminalExpandableBadgeLabelRow({
+    label,
+    secondaryLabel,
+    outputPreview,
+    status,
+    showOpenFileButton,
+    isOpenFileHovered,
+    onOpenFilePress,
+    onOpenFileHoverIn,
+    onOpenFileHoverOut,
+    styles,
+  }: TerminalExpandableBadgeLabelRowProps & {
+    styles: ReturnType<typeof createMarkdownStyles>;
+  }) {
+    const action = terminalActionForStatus(status);
+    const preview = outputPreview?.trim();
+
+    return (
+      <View style={expandableBadgeStylesheet.terminalLabelRow}>
+        <Text style={expandableBadgeStylesheet.terminalMainLine} numberOfLines={1}>
+          <Text style={expandableBadgeStylesheet.terminalAction}>{action}</Text>
+          <Text> </Text>
+          <Text style={expandableBadgeStylesheet.terminalLabel}>{label}</Text>
+          {secondaryLabel ? (
+            <>
+              <Text> </Text>
+              <Text style={expandableBadgeStylesheet.terminalSummaryText}>
+                {renderTerminalTextSpans(secondaryLabel, styles)}
+              </Text>
+            </>
+          ) : null}
+        </Text>
+        {preview ? (
+          <TerminalTextLine
+            content={`└ ${preview}`}
+            styles={styles}
+            baseStyle={expandableBadgeStylesheet.terminalOutputLine}
+            numberOfLines={1}
+          />
+        ) : null}
+        {showOpenFileButton ? (
+          <Pressable
+            onPress={onOpenFilePress}
+            onHoverIn={onOpenFileHoverIn}
+            onHoverOut={onOpenFileHoverOut}
+            accessibilityRole="button"
+            accessibilityLabel="Open file"
+            testID="tool-call-open-file"
+            style={[
+              expandableBadgeStylesheet.openFileButton,
+              expandableBadgeStylesheet.terminalOpenFileButton,
+            ]}
+            hitSlop={6}
+          >
+            <ThemedFileSymlinkIcon
+              size={14}
+              uniProps={isOpenFileHovered ? foregroundColorMapping : foregroundMutedColorMapping}
+            />
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }),
+);
+
+function renderTerminalStatusDot(status: ToolCallStatus): ReactNode {
+  const statusStyle =
+    status === "running" || status === "executing"
+      ? expandableBadgeStylesheet.terminalStatusDotRunning
+      : status === "failed"
+        ? expandableBadgeStylesheet.terminalStatusDotFailed
+        : status === "canceled"
+          ? expandableBadgeStylesheet.terminalStatusDotCanceled
+          : expandableBadgeStylesheet.terminalStatusDotCompleted;
+  return <View style={[expandableBadgeStylesheet.terminalStatusDot, statusStyle]} />;
 }
 
 // HACK: lucide ships every icon inside a 24×24 viewBox where the path
@@ -2735,6 +2958,9 @@ const ExpandableBadge = memo(function ExpandableBadge({
   isLastInSequence = false,
   disableOuterSpacing,
   testID,
+  terminalMode = false,
+  terminalStatus = "completed",
+  terminalOutputPreview,
 }: ExpandableBadgeProps) {
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const [isHovered, setIsHovered] = useState(false);
@@ -2967,6 +3193,9 @@ const ExpandableBadge = memo(function ExpandableBadge({
     chevronStyle,
     iconNode,
   });
+  const effectiveIconSlotNode = terminalMode
+    ? renderTerminalStatusDot(terminalStatus)
+    : iconSlotNode;
 
   const pressHandlers = isInteractive
     ? {
@@ -2990,33 +3219,60 @@ const ExpandableBadge = memo(function ExpandableBadge({
         accessibilityState={accessibilityState}
         style={pressableStyle}
       >
-        <View style={expandableBadgeStylesheet.headerRow}>
-          <View style={expandableBadgeStylesheet.iconBadge}>{iconSlotNode}</View>
-          <ExpandableBadgeLabelRow
-            label={label}
-            labelStyle={labelStyle}
-            secondaryLabel={secondaryLabel}
-            secondaryLabelStyle={secondaryLabelStyle}
-            shouldMeasureWebShimmer={shouldMeasureWebShimmer}
-            shouldMeasureNativeShimmer={shouldMeasureNativeShimmer}
-            isWebShimmer={isWebShimmer}
-            isNativeShimmer={isNativeShimmer}
-            shimmerLabelTextStyle={shimmerLabelTextStyle}
-            shimmerSecondaryTextStyle={shimmerSecondaryTextStyle}
-            labelRowWidth={labelRowWidth}
-            labelRowHeight={labelRowHeight}
-            nativeShimmerPeakWidth={nativeShimmerPeakWidth}
-            shimmerDuration={shimmerDuration}
-            nativeGradientId={nativeGradientIdRef.current}
-            onLabelRowLayout={handleLabelRowLayout}
-            onLabelLayout={handleLabelLayout}
-            onSecondaryLayout={handleSecondaryLayout}
-            showOpenFileButton={Boolean(onOpenFile && isHovered)}
-            isOpenFileHovered={isOpenFileHovered}
-            onOpenFilePress={handleOpenFilePress}
-            onOpenFileHoverIn={handleOpenFileHoverIn}
-            onOpenFileHoverOut={handleOpenFileHoverOut}
-          />
+        <View
+          style={[
+            expandableBadgeStylesheet.headerRow,
+            terminalMode && expandableBadgeStylesheet.terminalHeaderRow,
+          ]}
+        >
+          <View
+            style={[
+              expandableBadgeStylesheet.iconBadge,
+              terminalMode && expandableBadgeStylesheet.terminalIconBadge,
+            ]}
+          >
+            {effectiveIconSlotNode}
+          </View>
+          {terminalMode ? (
+            <ThemedTerminalExpandableBadgeLabelRow
+              uniProps={terminalMarkdownStyleMapping}
+              label={label}
+              secondaryLabel={secondaryLabel}
+              outputPreview={terminalOutputPreview}
+              status={terminalStatus}
+              showOpenFileButton={Boolean(onOpenFile && isHovered)}
+              isOpenFileHovered={isOpenFileHovered}
+              onOpenFilePress={handleOpenFilePress}
+              onOpenFileHoverIn={handleOpenFileHoverIn}
+              onOpenFileHoverOut={handleOpenFileHoverOut}
+            />
+          ) : (
+            <ExpandableBadgeLabelRow
+              label={label}
+              labelStyle={labelStyle}
+              secondaryLabel={secondaryLabel}
+              secondaryLabelStyle={secondaryLabelStyle}
+              shouldMeasureWebShimmer={shouldMeasureWebShimmer}
+              shouldMeasureNativeShimmer={shouldMeasureNativeShimmer}
+              isWebShimmer={isWebShimmer}
+              isNativeShimmer={isNativeShimmer}
+              shimmerLabelTextStyle={shimmerLabelTextStyle}
+              shimmerSecondaryTextStyle={shimmerSecondaryTextStyle}
+              labelRowWidth={labelRowWidth}
+              labelRowHeight={labelRowHeight}
+              nativeShimmerPeakWidth={nativeShimmerPeakWidth}
+              shimmerDuration={shimmerDuration}
+              nativeGradientId={nativeGradientIdRef.current}
+              onLabelRowLayout={handleLabelRowLayout}
+              onLabelLayout={handleLabelLayout}
+              onSecondaryLayout={handleSecondaryLayout}
+              showOpenFileButton={Boolean(onOpenFile && isHovered)}
+              isOpenFileHovered={isOpenFileHovered}
+              onOpenFilePress={handleOpenFilePress}
+              onOpenFileHoverIn={handleOpenFileHoverIn}
+              onOpenFileHoverOut={handleOpenFileHoverOut}
+            />
+          )}
         </View>
       </Pressable>
       {detailContent ? (
@@ -3044,11 +3300,79 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
   if (previous.isLastInSequence !== next.isLastInSequence) return false;
   if (previous.disableOuterSpacing !== next.disableOuterSpacing) return false;
   if (previous.testID !== next.testID) return false;
+  if (previous.terminalMode !== next.terminalMode) return false;
+  if (previous.terminalStatus !== next.terminalStatus) return false;
+  if (previous.terminalOutputPreview !== next.terminalOutputPreview) return false;
   if (previous.onToggle !== next.onToggle) return false;
   if (previous.onOpenFile !== next.onOpenFile) return false;
   if (previous.onDetailHoverChange !== next.onDetailHoverChange) return false;
   if (previous.renderDetails !== next.renderDetails) return false;
   return true;
+}
+
+function firstMeaningfulLine(value: string | null | undefined): string | undefined {
+  const line = value
+    ?.split(/\r?\n/)
+    .map((entry) => entry.trimEnd())
+    .find((entry) => entry.trim().length > 0);
+  return line ? line.slice(0, 180) : undefined;
+}
+
+function stringifyUnknownPreview(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "string") return firstMeaningfulLine(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return firstMeaningfulLine(value.map((entry) => String(entry)).join(" "));
+  }
+  if (typeof value === "object") {
+    try {
+      return firstMeaningfulLine(JSON.stringify(value));
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function toolCallOutputPreview(
+  detail: ToolCallDetail | undefined,
+  errorText?: string,
+): string | undefined {
+  if (errorText) return firstMeaningfulLine(errorText);
+  if (!detail) return undefined;
+  switch (detail.type) {
+    case "shell":
+      return firstMeaningfulLine(detail.output);
+    case "read":
+      return firstMeaningfulLine(detail.content);
+    case "edit":
+      return firstMeaningfulLine(detail.unifiedDiff ?? detail.newString ?? detail.oldString);
+    case "write":
+      return firstMeaningfulLine(detail.content);
+    case "search":
+      if (detail.content) return firstMeaningfulLine(detail.content);
+      if (detail.filePaths?.length) return detail.filePaths.slice(0, 3).join(" ");
+      if (detail.webResults?.length) return detail.webResults[0]?.title;
+      return undefined;
+    case "fetch":
+      return firstMeaningfulLine(detail.result ?? detail.codeText);
+    case "worktree_setup":
+      return firstMeaningfulLine(detail.log);
+    case "sub_agent":
+      return firstMeaningfulLine(detail.log);
+    case "plain_text":
+      return firstMeaningfulLine(detail.text ?? detail.label);
+    case "unknown":
+      return stringifyUnknownPreview(detail.output ?? detail.input);
+    case "plan":
+      return undefined;
+  }
+}
+
+function shouldUseTerminalToolCallMode(detail: ToolCallDetail | undefined): boolean {
+  if (!detail) return false;
+  return detail.type !== "plan";
 }
 
 interface ToolCallProps {
@@ -3121,6 +3445,11 @@ export const ToolCall = memo(function ToolCall({
     }
     return () => onOpenFilePath(openFilePath);
   }, [presentation.openFilePath, onOpenFilePath]);
+  const terminalOutputPreview = useMemo(
+    () => toolCallOutputPreview(effectiveDetail, presentation.errorText),
+    [effectiveDetail, presentation.errorText],
+  );
+  const terminalMode = shouldUseTerminalToolCallMode(effectiveDetail);
 
   const handleToggle = useCallback(() => {
     if (isMobile) {
@@ -3212,6 +3541,9 @@ export const ToolCall = memo(function ToolCall({
       isLastInSequence={isLastInSequence}
       disableOuterSpacing={disableOuterSpacing}
       onDetailHoverChange={onInlineDetailsHoverChange}
+      terminalMode={terminalMode}
+      terminalStatus={status}
+      terminalOutputPreview={terminalOutputPreview}
     />
   );
 }, areToolCallPropsEqual);

@@ -79,6 +79,19 @@ export function createMarkdownStyles(theme: Theme) {
       color: theme.colors.terminal.brightBlack,
     },
 
+    terminalCommand: {
+      color: theme.colors.terminal.brightBlue,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalOption: {
+      color: theme.colors.terminal.magenta,
+    },
+
+    terminalPunctuation: {
+      color: theme.colors.foregroundMuted,
+    },
+
     paragraph: {
       marginTop: 0,
       marginBottom: theme.spacing[3],
