@@ -129,7 +129,12 @@ function prependTerminalOutput(
 }
 
 const DEFAULT_TERMINAL_FONT_FAMILY = [
-  // Prefer common developer fonts, with Nerd Font variants for prompt/TUI glyphs.
+  // Match the Windows Terminal/Codex CLI look first, with developer font fallbacks.
+  "Cascadia Mono",
+  "Cascadia Code",
+  "Cascadia Mono PL",
+  "Cascadia Code PL",
+  "Consolas",
   "JetBrains Mono",
   "JetBrainsMono Nerd Font",
   "JetBrainsMono NF",
@@ -139,12 +144,16 @@ const DEFAULT_TERMINAL_FONT_FAMILY = [
   "FiraCode Nerd Font",
   // PUA-only fallback (many Nerd glyphs live here on some systems).
   "Symbols Nerd Font",
-  // System fallbacks.
+  // System and CJK fallbacks.
   "SF Mono",
   "Menlo",
   "Monaco",
-  "Consolas",
+  "'Microsoft YaHei UI'",
+  "'Microsoft YaHei'",
+  "'Noto Sans Mono CJK SC'",
+  "'Sarasa Mono SC'",
   "'Liberation Mono'",
+  "'Courier New'",
   "monospace",
 ].join(", ");
 
