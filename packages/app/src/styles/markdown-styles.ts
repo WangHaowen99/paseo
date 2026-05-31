@@ -35,6 +35,50 @@ export function createMarkdownStyles(theme: Theme) {
       overflowWrap: "anywhere" as const,
     },
 
+    terminalText: {
+      ...webSelectableTextStyle,
+      fontFamily: Fonts.mono,
+      color: theme.colors.terminal.foreground,
+      letterSpacing: 0,
+    },
+
+    terminalPath: {
+      color: theme.colors.terminal.cyan,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalIdentifier: {
+      color: theme.colors.terminal.blue,
+    },
+
+    terminalKeyword: {
+      color: theme.colors.terminal.magenta,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalNumber: {
+      color: theme.colors.terminal.brightBlue,
+    },
+
+    terminalSuccess: {
+      color: theme.colors.terminal.green,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalWarning: {
+      color: theme.colors.terminal.yellow,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalError: {
+      color: theme.colors.terminal.red,
+      fontWeight: theme.fontWeight.medium,
+    },
+
+    terminalMuted: {
+      color: theme.colors.terminal.brightBlack,
+    },
+
     paragraph: {
       marginTop: 0,
       marginBottom: theme.spacing[3],

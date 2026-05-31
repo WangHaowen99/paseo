@@ -1529,6 +1529,113 @@ function MarkdownInheritedText({
   return <MarkdownTextSpan style={style}>{children}</MarkdownTextSpan>;
 }
 
+interface MarkdownTerminalTextProps {
+  inheritedStyles: TextStyle;
+  textStyle: TextStyle;
+  terminalTextStyle: TextStyle;
+  styles: MarkdownStyles;
+  content: unknown;
+}
+
+const TERMINAL_TOKEN_PATTERN =
+  /(`[^`\n]+`|(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|~[\\/])?(?:[\w.-]+[\\/])+[\w.@-]+(?::\d+)?|[\w.-]+\.(?:[A-Za-z0-9]{1,8})(?::\d+)?|\b(?:passed|pass|success|succeeded|completed|complete|done|ok)\b|\b(?:warning|warn|deprecated)\b|\b(?:failed|fail|error|exception|invalid|timeout|bad gateway)\b|\b(?:match|where|select|update|insert|delete|create|drop|return|from|into|with|using)\b|\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+\b|\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b|\b\d+(?:\.\d+)?(?:ms|s|m|h|%|MB|GB|KB)?\b)/gi;
+
+function MarkdownTerminalText({
+  inheritedStyles,
+  textStyle,
+  terminalTextStyle,
+  styles,
+  content,
+}: MarkdownTerminalTextProps) {
+  const text = typeof content === "string" ? content : String(content ?? "");
+  const segments = useMemo(() => splitTerminalTextSegments(text, styles), [text, styles]);
+  const baseStyle = useMemo(
+    () => [inheritedStyles, textStyle, terminalTextStyle],
+    [inheritedStyles, textStyle, terminalTextStyle],
+  );
+
+  if (segments.length === 1 && !segments[0]?.style) {
+    return <MarkdownTextSpan style={baseStyle}>{text}</MarkdownTextSpan>;
+  }
+
+  return (
+    <>
+      {segments.map((segment, index) => (
+        <MarkdownTextSpan
+          key={`${index}:${segment.text.slice(0, 12)}`}
+          style={segment.style ? [baseStyle, segment.style] : baseStyle}
+        >
+          {segment.text}
+        </MarkdownTextSpan>
+      ))}
+    </>
+  );
+}
+
+interface TerminalTextSegment {
+  text: string;
+  style?: TextStyle;
+}
+
+function splitTerminalTextSegments(text: string, styles: MarkdownStyles): TerminalTextSegment[] {
+  if (!text) {
+    return [{ text }];
+  }
+
+  const segments: TerminalTextSegment[] = [];
+  const matcher = new RegExp(TERMINAL_TOKEN_PATTERN);
+  let cursor = 0;
+  for (const match of text.matchAll(matcher)) {
+    const value = match[0];
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      segments.push({ text: text.slice(cursor, index) });
+    }
+    segments.push({ text: value, style: getTerminalTokenStyle(value, styles) });
+    cursor = index + value.length;
+  }
+
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor) });
+  }
+
+  return segments.length > 0 ? segments : [{ text }];
+}
+
+function getTerminalTokenStyle(value: string, styles: MarkdownStyles): TextStyle | undefined {
+  const token = value.toLowerCase();
+
+  if (/^`[^`\n]+`$/.test(value)) {
+    return styles.terminalIdentifier;
+  }
+  if (/^(passed|pass|success|succeeded|completed|complete|done|ok)$/i.test(value)) {
+    return styles.terminalSuccess;
+  }
+  if (/^(warning|warn|deprecated)$/i.test(value)) {
+    return styles.terminalWarning;
+  }
+  if (/^(failed|fail|error|exception|invalid|timeout|bad gateway)$/i.test(value)) {
+    return styles.terminalError;
+  }
+  if (
+    /^(match|where|select|update|insert|delete|create|drop|return|from|into|with|using)$/i.test(
+      value,
+    )
+  ) {
+    return styles.terminalKeyword;
+  }
+  if (/^\d/.test(token)) {
+    return styles.terminalNumber;
+  }
+  if (/[\\/]/.test(value) || /[\w.-]+\.[A-Za-z0-9]{1,8}(?::\d+)?$/.test(value)) {
+    return styles.terminalPath;
+  }
+  if (value.includes("_") || value.includes(".")) {
+    return styles.terminalIdentifier;
+  }
+  return undefined;
+}
+
 interface MarkdownListItemContentProps {
   contentStyle: ViewStyle;
   children: ReactNode;
@@ -1590,13 +1697,14 @@ export const AssistantMessage = memo(function AssistantMessage({
         styles: MarkdownStyles,
         inheritedStyles: TextStyle = {},
       ) => (
-        <MarkdownInheritedText
+        <MarkdownTerminalText
           key={node.key}
           inheritedStyles={inheritedStyles}
           textStyle={styles.text}
-        >
-          {node.content}
-        </MarkdownInheritedText>
+          terminalTextStyle={styles.terminalText}
+          styles={styles}
+          content={node.content}
+        />
       ),
       textgroup: (
         node: ASTNode,
